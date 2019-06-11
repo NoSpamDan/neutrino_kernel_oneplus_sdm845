@@ -8469,6 +8469,9 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
 		return 0;
 	}
 
+	/* Record that we found atleast one task that could run on dst_cpu */
+	env->flags &= ~LBF_ALL_PINNED;
+
 	if (energy_aware() && !env->dst_rq->rd->overutilized &&
 	    env->idle == CPU_NEWLY_IDLE) {
 		long util_cum_dst, util_cum_src;
@@ -8481,9 +8484,6 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
 		if (util_cum_dst > util_cum_src)
 			return 0;
 	}
-
-	/* Record that we found atleast one task that could run on dst_cpu */
-	env->flags &= ~LBF_ALL_PINNED;
 
 #ifdef CONFIG_SCHED_WALT
 	if (env->flags & LBF_IGNORE_PREFERRED_CLUSTER_TASKS &&
@@ -10099,6 +10099,13 @@ static int should_we_balance(struct lb_env *env)
 	int cpu, balance_cpu = -1;
 
 	/*
+	 * Ensure the balancing environment is consistent; can happen
+	 * when the softirq triggers 'during' hotplug.
+	 */
+	if (!cpumask_test_cpu(env->dst_cpu, env->cpus))
+		return 0;
+
+	/*
 	 * In the newly idle case, we will allow all the cpu's
 	 * to do the newly idle load balance.
 	 */
@@ -10470,6 +10477,12 @@ static int idle_balance(struct rq *this_rq)
 	u64 curr_cost = 0;
 
 	if (cpu_isolated(this_cpu))
+		return 0;
+
+	/*
+	 * Do not pull tasks towards !active CPUs...
+	 */
+	if (!cpu_active(this_cpu))
 		return 0;
 
 	/*
